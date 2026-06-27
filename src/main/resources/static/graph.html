@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FraudLens — Transaction Graph</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2">
   <!-- Vis.js served locally -->
   <script src="vis-network.min.js"></script>
   <link rel="stylesheet" href="vis-network.min.css">
@@ -41,12 +41,33 @@
     </div>
   </div>
 
+  <!-- Month Filter Panel -->
+  <div class="month-filter-panel" id="month-filter-panel">
+    <span class="month-filter-title">Filter Graph:</span>
+    <label class="filter-checkbox-label">
+      <input type="checkbox" id="filter-fraud" checked onchange="onFilterChange()"> Fraud
+    </label>
+    <label class="filter-checkbox-label">
+      <input type="checkbox" id="filter-suspicious" checked onchange="onFilterChange()"> Suspicious
+    </label>
+    <label class="filter-checkbox-label">
+      <input type="checkbox" id="filter-high-risk" checked onchange="onFilterChange()"> High Risk
+    </label>
+    <label class="filter-checkbox-label">
+      <input type="checkbox" id="filter-normal" onchange="onFilterChange()"> Normal
+    </label>
+    <label class="filter-checkbox-label">
+      <input type="checkbox" id="filter-merchant" onchange="onFilterChange()"> Merchant
+    </label>
+  </div>
+
   <!-- Legend -->
   <div class="legend" style="margin-bottom:14px;">
     <div class="legend-item"><div class="legend-dot" style="background:#E24B4A"></div>Fraud</div>
     <div class="legend-item"><div class="legend-dot" style="background:#EF9F27"></div>Suspicious</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#a1855c"></div>At Risk</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#4e9af1"></div>Normal</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#4e9af1"></div>High Risk</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#c9a27a"></div>Normal</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#4b5563"></div>Merchant</div>
     <div class="legend-item" style="margin-left:auto;font-size:12px;color:var(--text-muted);">
       Showing <strong id="node-count">–</strong> nodes · <strong id="edge-count">–</strong> edges
     </div>
@@ -61,7 +82,7 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 <script>
   loadGraph();
 </script>

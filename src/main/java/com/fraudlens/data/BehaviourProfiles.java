@@ -1,63 +1,125 @@
 package com.fraudlens.data;
 
+import com.fraudlens.model.MerchantCategory;
+import com.fraudlens.model.Profession;
+
+import java.util.Set;
+
 /**
- * Defines realistic behaviour profiles for each account range.
- *
- * SOLID-S: single responsibility — profile lookup only.
- *
- * Each profile controls how LifestyleGenerator produces day-to-day
- * transactions for that account:
- *   - txnsPerMonth:   how many lifestyle transactions to generate
- *   - baseAmount:     minimum typical transaction amount (₹)
- *   - amountJitter:   random variation added on top of baseAmount (₹)
- *   - activeHourFrom: earliest hour the account typically transacts
- *   - activeHourTo:   latest hour the account typically transacts
- *   - roundAmounts:   true → round to nearest ₹100 (business behaviour)
+ * Defines realistic behaviour profiles for different user types.
  */
 public class BehaviourProfiles {
 
-    /** Immutable profile record. */
-    public record BehaviourProfile(
-            int txnsPerMonth,
-            double baseAmount,
-            double amountJitter,
-            int activeHourFrom,
-            int activeHourTo,
-            boolean roundAmounts
-    ) {}
+        public record BehaviourProfile(
+                Profession profession,
+                int minMonthlyTxns,
+                int maxMonthlyTxns,
+                double minTxnAmount,
+                double maxTxnAmount,
+                Set<MerchantCategory> preferredCategories,
+                double merchantTxnProbability,
+                double p2pProbability,
+                double weekendMultiplier,
+                boolean hasSalary,
+                double salaryAmount,
+                boolean hasRecurringPayments
+        ) {}
 
-    // ── Pre-built profiles ──────────────────────────────────────────
+    private static BehaviourProfile createProfile(
+            Profession profession,
+            int minTxns,
+            int maxTxns,
+            double minAmount,
+            double maxAmount,
+            Set<MerchantCategory> categories,
+            double merchantProbability,
+            double p2pProbability,
+            double weekendMultiplier,
+            boolean hasSalary,
+            double salaryAmount,
+            boolean hasRecurringPayments
+    ) {
+        return new BehaviourProfile(
+                profession,
+                minTxns,
+                maxTxns,
+                minAmount,
+                maxAmount,
+                categories,
+                merchantProbability,
+                p2pProbability,
+                weekendMultiplier,
+                hasSalary,
+                salaryAmount,
+                hasRecurringPayments
+        );
+    }
 
-    /** Accounts 1–16: cycle-pattern accounts. Low personal activity. */
-    private static final BehaviourProfile CYCLE_ACCOUNT =
-            new BehaviourProfile(10, 500, 1500, 9, 18, false);
+    private static final BehaviourProfile STUDENT = createProfile(
+            Profession.STUDENT, 7, 15, 100, 2500, 
+             Set.of(
+                    MerchantCategory.RESTAURANT,
+                    MerchantCategory.TELECOM,
+                    MerchantCategory.ENTERTAINMENT,
+                    MerchantCategory.SHOPPING
+            ), 0.30,  0.70, 1.5, false, 0.0, false );
 
-    /** Accounts 17–40: regular users, moderate activity. */
-    private static final BehaviourProfile REGULAR_USER =
-            new BehaviourProfile(8, 200, 1300, 8, 22, false);
+    private static final BehaviourProfile SALARIED = createProfile(
+            Profession.SALARIED_EMPLOYEE, 12, 18, 200, 5000,
+            Set.of(
+                    MerchantCategory.GROCERY,
+                    MerchantCategory.FUEL,
+                    MerchantCategory.UTILITY,
+                    MerchantCategory.RESTAURANT,
+                    MerchantCategory.SHOPPING,
+                    MerchantCategory.ENTERTAINMENT
+            ), 0.40, 0.60, 1.3, true, 60000.0, true );
 
-    /** Accounts 41–52: hub/threshold pattern accounts. Business-like. */
-    private static final BehaviourProfile BUSINESS_ACCOUNT =
-            new BehaviourProfile(6, 1000, 3000, 9, 17, true);
+    private static final BehaviourProfile BUSINESS = createProfile(
+            Profession.BUSINESS_OWNER, 20, 35, 500, 15000,
+            Set.of(
+                    MerchantCategory.UTILITY,
+                    MerchantCategory.SHOPPING,
+                    MerchantCategory.TELECOM,
+                    MerchantCategory.EDUCATION
+            ), 0.70, 0.30, 0.8, false,0.0, true );
 
-    /** Accounts 53–80: active clean users. Higher volume. */
-    private static final BehaviourProfile ACTIVE_USER =
-            new BehaviourProfile(15, 100, 4900, 6, 23, false);
+    private static final BehaviourProfile FREELANCER = createProfile(
+            Profession.FREELANCER, 5, 15, 300, 8000,
+            Set.of(
+                    MerchantCategory.UTILITY,
+                    MerchantCategory.SHOPPING,
+                    MerchantCategory.ENTERTAINMENT,
+                    MerchantCategory.RESTAURANT
+            ), 0.35, 0.65, 1.2, false,0.0,true );
 
-    /** Accounts 81–100: merchants / utilities. Very few outgoing txns. */
-    private static final BehaviourProfile MERCHANT =
-            new BehaviourProfile(3, 1000, 2000, 10, 16, true);
+    private static final BehaviourProfile RETIRED = createProfile(
+            Profession.RETIRED, 6, 15, 200, 3000,
+            Set.of(
+                    MerchantCategory.GROCERY,
+                    MerchantCategory.FUEL,
+                    MerchantCategory.HOSPITAL,
+                    MerchantCategory.UTILITY
+            ),0.70,0.30,0.9,false,0.0, true);
 
-    // ── Lookup ──────────────────────────────────────────────────────
+    private static final BehaviourProfile MERCHANT = createProfile(
+            Profession.MERCHANT,30, 50, 1000, 20000,
+            Set.of(
+                    //MerchantCategory.UTILITY,
+                   // MerchantCategory.TELECOM
+            ),0.0,0.0,1,false,0.0,false );
 
     /**
-     * Returns the behaviour profile for a given account number (1–100).
+     * Returns the behaviour profile for a given profession.
      */
-    public static BehaviourProfile forAccount(int accountNum) {
-        if (accountNum <= 16) return CYCLE_ACCOUNT;
-        if (accountNum <= 40) return REGULAR_USER;
-        if (accountNum <= 52) return BUSINESS_ACCOUNT;
-        if (accountNum <= 80) return ACTIVE_USER;
-        return MERCHANT;
+    public static BehaviourProfile forProfession(Profession profession) {
+        return switch (profession) {
+            case STUDENT -> STUDENT;
+            case SALARIED_EMPLOYEE -> SALARIED;
+            case BUSINESS_OWNER -> BUSINESS;
+            case FREELANCER -> FREELANCER;
+            case RETIRED -> RETIRED;
+            case MERCHANT -> MERCHANT;
+        };
     }
 }

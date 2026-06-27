@@ -1,22 +1,21 @@
 package com.fraudlens.data;
 
 import com.fraudlens.model.Account;
+import com.fraudlens.model.Profession;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 
 /**
- * Factory Pattern: creates the 100 seeded accounts.
- *
- * SOLID-S: single responsibility — account creation only.
+ * Factory Pattern: creates the 100 seeded accounts with profiles and balances.
  *
  * Account ranges:
- *   001–016  Cycle-pattern accounts
- *   017–040  Regular users (some involved in rapid-hop chains)
- *   041–044  Threshold/structuring senders
- *   045–052  Hub pattern accounts
- *   053–080  Clean regular users
- *   081–100  Merchant / utility accounts (receive-only)
+ *   001–016  Students (cycle-pattern potential)
+ *   017–040  Salaried & Freelancers (regular users)
+ *   041–052  Business Owners (hub/threshold pattern potential)
+ *   053–080  Mixed (salaried & retired, clean users)
+ *   081–100  Merchant / utility accounts
  */
 public class AccountFactory {
 
@@ -55,11 +54,64 @@ public class AccountFactory {
 
     public List<Account> createAccounts() {
         List<Account> accounts = new ArrayList<>(100);
+        Random rnd = new Random(42L); // Fixed seed for reproducibility
+
         for (int i = 1; i <= 100; i++) {
-            String id   = "ACC_" + String.format("%03d", i);
+            String id = "ACC_" + String.format("%03d", i);
             String name = (i <= NAMES.length) ? NAMES[i - 1] : "User " + id;
-            accounts.add(new Account(id, name));
+            
+            // Determine profession and financial profile based on account number
+            Profession profession = determineProfession(i);
+            double monthlyIncome = generateMonthlyIncome(profession, rnd);
+            double initialBalance = monthlyIncome * 2 + rnd.nextDouble() * monthlyIncome;
+            int age = generateAge(profession, rnd);
+
+            accounts.add(new Account(id, name, profession, age, initialBalance, monthlyIncome));
         }
         return accounts;
+    }
+
+    /**
+     * Assigns profession based on account number to maintain patterns.
+     */
+    private Profession determineProfession(int accountNum) {
+        if (accountNum <= 16) {
+            return Profession.STUDENT;
+        } else if (accountNum <= 28) {
+            return Profession.SALARIED_EMPLOYEE;
+        } else if (accountNum <= 40) {
+            return Profession.FREELANCER;
+        } else if (accountNum <= 52) {
+            return Profession.BUSINESS_OWNER;
+        } else if (accountNum <= 70) {
+            return Profession.SALARIED_EMPLOYEE;
+        } else if (accountNum <= 80) {
+            return Profession.RETIRED;
+        } else {
+            return Profession.MERCHANT;
+        }
+    }
+
+    /**
+     * Generates realistic monthly income based on profession.
+     */
+    private double generateMonthlyIncome(Profession profession, Random rnd) {
+        double min = profession.getMinMonthlyIncome();
+        double max = profession.getMaxMonthlyIncome();
+        return min + rnd.nextDouble() * (max - min);
+    }
+
+    /**
+     * Generates a realistic age based on profession.
+     */
+    private int generateAge(Profession profession, Random rnd) {
+        return switch (profession) {
+            case STUDENT -> 18 + rnd.nextInt(8);
+            case SALARIED_EMPLOYEE -> 22 + rnd.nextInt(39);
+            case BUSINESS_OWNER -> 28 + rnd.nextInt(38);
+            case FREELANCER -> 22 + rnd.nextInt(34);
+            case RETIRED -> 60 + rnd.nextInt(21);
+            case MERCHANT -> 25 + rnd.nextInt(41);
+        };
     }
 }

@@ -1,7 +1,7 @@
 package com.fraudlens.controller;
 
-import com.fraudlens.graph.TransactionGraph;
-import com.fraudlens.model.Account;
+//import com.fraudlens.graph.TransactionGraph;
+//import com.fraudlens.model.Account;
 import com.fraudlens.model.FraudAlert;
 import com.fraudlens.model.Transaction;
 import com.fraudlens.service.FraudAnalysisService;
@@ -14,12 +14,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * REST API controller — Spring Boot annotations used only here (and FraudLensApp).
- *
- * @CrossOrigin allows the plain HTML frontend files to call this API from any origin.
- */
-@RestController
+@RestController  // class handels HTTP requests and returns JSON responses
 @CrossOrigin
 @RequestMapping("/api")
 public class FraudController {
@@ -36,11 +31,11 @@ public class FraudController {
      */
     @GetMapping("/graph")
     public Map<String, Object> getGraph(
-            @RequestParam(defaultValue = "month") String view,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        if (date == null && !"month".equalsIgnoreCase(view)) {
-            date = LocalDate.of(2024, 1, 18);
-        }
+        @RequestParam(defaultValue = "month") String view,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+            if (date == null && !"month".equalsIgnoreCase(view)) {
+                date = LocalDate.of(2024, 1, 18);  //default date for testing purposes
+            }
         return fraudAnalysisService.getGraphDataForSlice(view, date);
     }
 
@@ -124,10 +119,11 @@ public class FraudController {
     @GetMapping("/stats")
     public Map<String, Object> getStats(
             @RequestParam(defaultValue = "month") String view,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        if (date == null && !"month".equalsIgnoreCase(view)) {
-            date = LocalDate.of(2024, 1, 18);
-        }
+            @RequestParam(required = false) 
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+            if (date == null && !"month".equalsIgnoreCase(view)) {
+                date = LocalDate.of(2024, 1, 18);
+            }
         return fraudAnalysisService.getStatsForSlice(view, date);
     }
 

@@ -1,6 +1,7 @@
 package com.fraudlens.data;
 
 import com.fraudlens.model.Account;
+import com.fraudlens.model.MerchantCategory;
 import com.fraudlens.model.Transaction;
 import com.fraudlens.service.FraudAnalysisService;
 import jakarta.annotation.PostConstruct;
@@ -13,9 +14,15 @@ import java.util.*;
 /**
  * Orchestrates startup data seeding with realistic transaction logs.
  *
- * Randomly picks non-consecutive accounts for cycles, hubs, timing chains, and structuring.
- * All transactions are distributed naturally across the January 2024 timeline.
+ * Flow:
+ * 1. Create 100 accounts with profession-based profiles and initial balances
+ * 2. Generate salary transactions for salaried employees
+ * 3. Generate recurring transactions (bills, subscriptions, etc.)
+ * 4. Generate realistic lifestyle transactions (merchant + peer-to-peer)
+ * 5. Inject fraud patterns (maintaining account balances)
+ * 6. Hand off to FraudAnalysisService
  */
+
 @Component
 public class DataSeeder {
 
@@ -24,27 +31,42 @@ public class DataSeeder {
 
     @PostConstruct
     public void init() {
-        // Step 1: Create 100 accounts using AccountFactory
+        // Step 1: Create 100 accounts with professions and balances
         List<Account> accounts = new AccountFactory().createAccounts();
 
-        // Seeded random for reproducible fraud participant selection
-        Random rnd = new Random(12345L);
+        List<Transaction> allTransactions = new ArrayList<>();
+
+        // Step 2: Generate salary transactions
+        SalaryGenerator salaryGen = new SalaryGenerator();
+        Random salaryRnd = new Random(11111L);
+        allTransactions.addAll(salaryGen.generateSalaries(accounts, salaryRnd));
+
+
+        // Step 4: Generate normal lifestyle transactions
+        LifestyleGenerator lifestyleGen = new LifestyleGenerator(33333L);
+        for (Account acc : accounts) {
+            int accountNum = Integer.parseInt(acc.getAccountId().substring(4));
+            if (accountNum <= 80) { // Only generate for non-merchant accounts
+                allTransactions.addAll(lifestyleGen.generateFor(acc, accounts));
+            }
+        }
+
+        // Step 5: Pick fraud participant accounts (seeded and non-consecutive)
+        Random fraudRnd = new Random(12345L);
         Set<String> usedAccounts = new HashSet<>();
 
-        // Helper to select random distinct non-consecutive peer accounts (1-80)
-        // 81-100 are merchants
-        String cycle1_1 = pickRandomAccount(rnd, usedAccounts);
-        String cycle1_2 = pickRandomAccount(rnd, usedAccounts);
-        String cycle1_3 = pickRandomAccount(rnd, usedAccounts);
+        String cycle1_1 = pickRandomAccount(fraudRnd, usedAccounts);
+        String cycle1_2 = pickRandomAccount(fraudRnd, usedAccounts);
+        String cycle1_3 = pickRandomAccount(fraudRnd, usedAccounts);
 
-        String hub1_center = pickRandomAccount(rnd, usedAccounts);
+        String hub1_center = pickRandomAccount(fraudRnd, usedAccounts);
 
-        String rh_1 = pickRandomAccount(rnd, usedAccounts);
-        String rh_2 = pickRandomAccount(rnd, usedAccounts);
-        String rh_3 = pickRandomAccount(rnd, usedAccounts);
-        String rh_4 = pickRandomAccount(rnd, usedAccounts);
+        String rh_1 = pickRandomAccount(fraudRnd, usedAccounts);
+        String rh_2 = pickRandomAccount(fraudRnd, usedAccounts);
+        String rh_3 = pickRandomAccount(fraudRnd, usedAccounts);
+        String rh_4 = pickRandomAccount(fraudRnd, usedAccounts);
 
-        String th_1 = pickRandomAccount(rnd, usedAccounts);
+        String th_1 = pickRandomAccount(fraudRnd, usedAccounts);
 
         // Print selected fraud seeds for verification
         System.out.println("[FraudLens Seeding] Selected Fraud Seeds:");
@@ -53,76 +75,73 @@ public class DataSeeder {
         System.out.println("  Rapid Hop: " + rh_1 + " -> " + rh_2 + " -> " + rh_3 + " -> " + rh_4);
         System.out.println("  Threshold Sender: " + th_1);
 
-        List<Transaction> allTransactions = new ArrayList<>();
-
-        // Generate normal lifestyle transactions for peer accounts
-        // Each normal peer account (not in usedAccounts, and <= 80) gets 3 transactions
-        LifestyleGenerator lifestyleGen = new LifestyleGenerator();
-        BehaviourProfiles.BehaviourProfile regularProfile = new BehaviourProfiles.BehaviourProfile(
-                3,      // 3 transactions per month
-                200.0,  // base ₹200
-                1800.0, // jitter ₹1800 (max ₹2000)
-                9,      // active hour from
-                21,     // active hour to
-                false   // round amounts
-        );
-
-        for (Account acc : accounts) {
-            int num = Integer.parseInt(acc.getAccountId().substring(4));
-            if (num <= 80 && !usedAccounts.contains(acc.getAccountId())) {
-                allTransactions.addAll(lifestyleGen.generateFor(acc, regularProfile));
-            }
-        }
-
-        // Now plant patterns:
-
-        // 1. Cycle 1: C1_1 -> C1_2 -> C1_3 -> C1_1 (Spans multiple days/weeks)
-        double c1Amt = 12500.0;
-        allTransactions.add(new Transaction(uid("CYC", rnd), cycle1_1, cycle1_2, c1Amt, LocalDateTime.of(2024, 1, 4, 10, 15), "NORMAL"));
-        allTransactions.add(new Transaction(uid("CYC", rnd), cycle1_2, cycle1_3, c1Amt, LocalDateTime.of(2024, 1, 10, 14, 30), "NORMAL"));
-        allTransactions.add(new Transaction(uid("CYC", rnd), cycle1_3, cycle1_1, c1Amt, LocalDateTime.of(2024, 1, 15, 11, 45), "NORMAL"));
+        // Step 6: Inject fraud patterns
         
-        allTransactions.add(new Transaction(uid("CYC", rnd), cycle1_1, cycle1_2, c1Amt, LocalDateTime.of(2024, 1, 19, 9, 30), "NORMAL"));
-        allTransactions.add(new Transaction(uid("CYC", rnd), cycle1_2, cycle1_3, c1Amt, LocalDateTime.of(2024, 1, 23, 16, 10), "NORMAL"));
-        allTransactions.add(new Transaction(uid("CYC", rnd), cycle1_3, cycle1_1, c1Amt, LocalDateTime.of(2024, 1, 28, 12, 0), "NORMAL"));
+        // 1. Cycle Pattern: C1_1 -> C1_2 -> C1_3 -> C1_1 (Spans multiple days/weeks)
+        double c1Amt = 12500.0;
+        allTransactions.add(new Transaction(uid("CYC", fraudRnd), cycle1_1, cycle1_2, c1Amt, LocalDateTime.of(2024, 1, 4, 10, 15), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("CYC", fraudRnd), cycle1_2, cycle1_3, c1Amt, LocalDateTime.of(2024, 1, 10, 14, 30), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("CYC", fraudRnd), cycle1_3, cycle1_1, c1Amt, LocalDateTime.of(2024, 1, 15, 11, 45), "NORMAL", MerchantCategory.TRANSFER));
+        
+        allTransactions.add(new Transaction(uid("CYC", fraudRnd), cycle1_1, cycle1_2, c1Amt, LocalDateTime.of(2024, 1, 19, 9, 30), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("CYC", fraudRnd), cycle1_2, cycle1_3, c1Amt, LocalDateTime.of(2024, 1, 23, 16, 10), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("CYC", fraudRnd), cycle1_3, cycle1_1, c1Amt, LocalDateTime.of(2024, 1, 28, 12, 0), "NORMAL", MerchantCategory.TRANSFER));
 
-        // 2. Hub 1 (Fan-out center H1_C sends to 6 random leaves)
+        updateAccountBalances(accounts, cycle1_1, cycle1_2, cycle1_3, c1Amt, true); // Update balances for cycle
+
+        // 2. Hub Pattern: Hub center sends to 6 random leaves
         double h1Amt = 8500.0;
         List<String> h1Leaves = new ArrayList<>();
         for (int i = 0; i < 6; i++) {
-            h1Leaves.add(pickRandomAccount(rnd, usedAccounts));
+            h1Leaves.add(pickRandomAccount(fraudRnd, usedAccounts));
         }
         for (int i = 0; i < h1Leaves.size(); i++) {
             String leaf = h1Leaves.get(i);
-            allTransactions.add(new Transaction(uid("HUB", rnd), hub1_center, leaf, h1Amt, LocalDateTime.of(2024, 1, 3 + i * 4, 10, 0), "NORMAL"));
-            allTransactions.add(new Transaction(uid("HUB", rnd), hub1_center, leaf, h1Amt, LocalDateTime.of(2024, 1, 15 + i * 2, 14, 0), "NORMAL"));
+            allTransactions.add(new Transaction(uid("HUB", fraudRnd), hub1_center, leaf, h1Amt, LocalDateTime.of(2024, 1, 3 + i * 4, 10, 0), "NORMAL", MerchantCategory.TRANSFER));
+            allTransactions.add(new Transaction(uid("HUB", fraudRnd), hub1_center, leaf, h1Amt, LocalDateTime.of(2024, 1, 15 + i * 2, 14, 0), "NORMAL", MerchantCategory.TRANSFER));
+
+            // Update balances
+            Account hubCenter = getAccountById(accounts, hub1_center);
+            Account leafAcc = getAccountById(accounts, leaf);
+            if (hubCenter != null && leafAcc != null) {
+                hubCenter.debitBalance(h1Amt);
+                leafAcc.creditBalance(h1Amt);
+            }
         }
 
         // 3. Rapid Hop timing-based chain on Jan 18 (4 nodes, 3 hops)
         LocalDateTime rhTime = LocalDateTime.of(2024, 1, 18, 10, 0, 0);
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_1, rh_2, 65000.0, rhTime, "NORMAL"));
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_1, rh_2, 65000.0, rhTime.plusSeconds(8), "NORMAL"));
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_1, rh_2, 65000.0, rhTime.plusSeconds(16), "NORMAL"));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_1, rh_2, 65000.0, rhTime, "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_1, rh_2, 65000.0, rhTime.plusSeconds(8), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_1, rh_2, 65000.0, rhTime.plusSeconds(16), "NORMAL", MerchantCategory.TRANSFER));
 
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_2, rh_3, 63500.0, rhTime.plusSeconds(30), "NORMAL"));
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_2, rh_3, 63500.0, rhTime.plusSeconds(38), "NORMAL"));
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_2, rh_3, 63500.0, rhTime.plusSeconds(46), "NORMAL"));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_2, rh_3, 63500.0, rhTime.plusSeconds(30), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_2, rh_3, 63500.0, rhTime.plusSeconds(38), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_2, rh_3, 63500.0, rhTime.plusSeconds(46), "NORMAL", MerchantCategory.TRANSFER));
 
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_3, rh_4, 62000.0, rhTime.plusSeconds(60), "NORMAL"));
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_3, rh_4, 62000.0, rhTime.plusSeconds(68), "NORMAL"));
-        allTransactions.add(new Transaction(uid("RHP", rnd), rh_3, rh_4, 62000.0, rhTime.plusSeconds(76), "NORMAL"));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_3, rh_4, 62000.0, rhTime.plusSeconds(60), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_3, rh_4, 62000.0, rhTime.plusSeconds(68), "NORMAL", MerchantCategory.TRANSFER));
+        allTransactions.add(new Transaction(uid("RHP", fraudRnd), rh_3, rh_4, 62000.0, rhTime.plusSeconds(76), "NORMAL", MerchantCategory.TRANSFER));
+
+        updateRapidHopBalances(accounts, rh_1, rh_2, rh_3, rh_4);
 
         // 4. Threshold Structuring (evading detection by staying just below ₹49,500)
         int[] thMerchants = {81, 82, 83, 84, 85, 86, 87, 88, 89, 90};
         for (int i = 0; i < 12; i++) {
             double ratio = 0.975 + (i * 0.002);
-            double amount1 = Math.round(49500.0 * ratio * 100.0) / 100.0;
-            String merchant1 = "ACC_0" + thMerchants[rnd.nextInt(thMerchants.length)];
-            LocalDateTime ts1 = LocalDateTime.of(2024, 1, 2 + i * 2, 9, 30);
-            allTransactions.add(new Transaction(uid("THR", rnd), th_1, merchant1, amount1, ts1, "NORMAL"));
+            double amount = Math.round(49500.0 * ratio * 100.0) / 100.0;
+            String merchant = "ACC_" + String.format("%03d", thMerchants[fraudRnd.nextInt(thMerchants.length)]);
+            LocalDateTime ts = LocalDateTime.of(2024, 1, 2 + i * 2, 9, 30);
+            allTransactions.add(new Transaction(uid("THR", fraudRnd), th_1, merchant, amount, ts, "NORMAL", MerchantCategory.TRANSFER));
+
+            // Update balance
+            Account thAccount = getAccountById(accounts, th_1);
+            if (thAccount != null) {
+                thAccount.debitBalance(amount);
+            }
         }
 
-        // Hand off to analysis service
+        // Step 7: Hand off to analysis service
         fraudAnalysisService.initialize(accounts, allTransactions);
         System.out.println("[FraudLens] Seeded " + accounts.size()
                 + " accounts, " + allTransactions.size() + " transactions.");
@@ -146,6 +165,56 @@ public class DataSeeder {
                     return id;
                 }
             }
+        }
+    }
+
+    private Account getAccountById(List<Account> accounts, String accountId) {
+        for (Account acc : accounts) {
+            if (acc.getAccountId().equals(accountId)) {
+                return acc;
+            }
+        }
+        return null;
+    }
+
+    private void updateAccountBalances(List<Account> accounts, String acc1, String acc2, String acc3, double amount, boolean isCycle) {
+        Account a1 = getAccountById(accounts, acc1);
+        Account a2 = getAccountById(accounts, acc2);
+        Account a3 = getAccountById(accounts, acc3);
+
+        if (a1 != null && a2 != null && a3 != null) {
+            // Cycle: a1 -> a2 -> a3 -> a1 (2 rounds)
+            for (int round = 0; round < 2; round++) {
+                a1.debitBalance(amount);
+                a2.creditBalance(amount);
+                
+                a2.debitBalance(amount);
+                a3.creditBalance(amount);
+                
+                a3.debitBalance(amount);
+                a1.creditBalance(amount);
+            }
+        }
+    }
+
+    private void updateRapidHopBalances(List<Account> accounts, String rh1, String rh2, String rh3, String rh4) {
+        Account a1 = getAccountById(accounts, rh1);
+        Account a2 = getAccountById(accounts, rh2);
+        Account a3 = getAccountById(accounts, rh3);
+        Account a4 = getAccountById(accounts, rh4);
+
+        if (a1 != null && a2 != null && a3 != null && a4 != null) {
+            // 3 transactions: a1->a2
+            a1.debitBalance(65000 * 3);
+            a2.creditBalance(65000 * 3);
+
+            // 3 transactions: a2->a3
+            a2.debitBalance(63500 * 3);
+            a3.creditBalance(63500 * 3);
+
+            // 3 transactions: a3->a4
+            a3.debitBalance(62000 * 3);
+            a4.creditBalance(62000 * 3);
         }
     }
 
