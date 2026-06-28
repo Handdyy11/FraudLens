@@ -116,16 +116,11 @@ public class LifestyleGenerator {
             txns.add(txn);
             account.debitBalance(amount);
 
-            // If this is a transfer to another account, credit them
-            if (!isMerchantTxn && accountNum <= 80) {
-                int receiverNum = Integer.parseInt(toAccount.substring(4));
-                if (receiverNum <= 80) { // Only credit between regular accounts
-                    for (Account acc : allAccounts) {
-                        if (acc.getAccountId().equals(toAccount)) {
-                            acc.creditBalance(amount);
-                            break;
-                        }
-                    }
+            // Credit the receiving account (regular or merchant)
+            for (Account acc : allAccounts) {
+                if (acc.getAccountId().equals(toAccount)) {
+                    acc.creditBalance(amount);
+                    break;
                 }
             }
         }

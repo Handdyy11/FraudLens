@@ -11,7 +11,7 @@ import java.util.Random;
 
 /**
  * Generates monthly salary transactions for salaried employees.
- * Salaries arrive from an employer account on realistic dates (1st-7th of month).
+ * Salaries arrive from an employer account on dates (1st-7th of month).
  */
 public class SalaryGenerator {
 
@@ -24,9 +24,7 @@ public class SalaryGenerator {
         List<Transaction> salaryTxns = new ArrayList<>();
 
         for (Account account : accounts) {
-            BehaviourProfiles.BehaviourProfile profile = BehaviourProfiles.forProfession(
-                    account.getProfession()
-            );
+            BehaviourProfiles.BehaviourProfile profile = BehaviourProfiles.forProfession(account.getProfession());
 
             if (profile.hasSalary()) {
                 // Generate monthly salary on random day between 1st-7th
@@ -44,8 +42,7 @@ public class SalaryGenerator {
                         salaryAmount,
                         salaryDate,
                         "NORMAL",
-                        MerchantCategory.SALARY
-                );
+                        MerchantCategory.SALARY);
 
                 salaryTxns.add(salary);
 

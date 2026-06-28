@@ -6,13 +6,16 @@ import com.fraudlens.patterns.FraudDetector;
 import java.util.*;
 
 /**
- * Strategy Pattern implementation — HubDetector is one concrete fraud detection strategy.
+ * Strategy Pattern implementation — HubDetector is one concrete fraud detection
+ * strategy.
  *
  * Algorithm: Max-Heap (PriorityQueue) on combined in+out degree score.
- * Detects accounts with abnormally high connection counts — typical of money mule hubs.
+ * Detects accounts with abnormally high connection counts — typical of money
+ * mule hubs.
  * Time complexity: O(n log k) where n = accounts, k = TOP_K threshold.
  *
- * Liskov Substitution (SOLID-L): can replace any other FraudDetector without breaking callers.
+ * Liskov Substitution (SOLID-L): can replace any other FraudDetector without
+ * breaking callers.
  * Single Responsibility (SOLID-S): only responsible for hub account detection.
  */
 public class HubDetector implements FraudDetector {
@@ -30,16 +33,17 @@ public class HubDetector implements FraudDetector {
         for (Map.Entry<String, Set<String>> entry : adjList.entrySet()) {
             String node = entry.getKey();
             int outDegree = entry.getValue().size();
-            degreeMap.merge(node, outDegree, Integer::sum);
+            int currentDegree = degreeMap.getOrDefault(node, 0);
+            degreeMap.put(node, currentDegree + outDegree);
             // Credit in-degree to each destination
             for (String neighbor : entry.getValue()) {
-                degreeMap.merge(neighbor, 1, Integer::sum);
+                int degree = degreeMap.getOrDefault(neighbor, 0);
+                degreeMap.put(neighbor, degree + 1);
             }
         }
 
-        // Max-Heap: sort all accounts by degree, highest first  O(n log k)
-        PriorityQueue<Map.Entry<String, Integer>> maxHeap =
-                new PriorityQueue<>((a, b) -> b.getValue() - a.getValue());
+        // Max-Heap: sort all accounts by degree, highest first O(n log k)
+        PriorityQueue<Map.Entry<String, Integer>> maxHeap = new PriorityQueue<>((a, b) -> b.getValue() - a.getValue());
         maxHeap.addAll(degreeMap.entrySet());
 
         // Extract top-K hub accounts that exceed the threshold
@@ -55,11 +59,9 @@ public class HubDetector implements FraudDetector {
 
         List<FraudAlert> alerts = new ArrayList<>();
         if (!topHubs.isEmpty()) {
-            alerts.add(new FraudAlert(
-                "HUB",
-                "Accounts with abnormally high connection counts detected (degree ≥ " + HUB_THRESHOLD + ")",
-                topHubs
-            ));
+            alerts.add(new FraudAlert("HUB",
+                    "Accounts with abnormally high connection counts detected (degree ≥ " + HUB_THRESHOLD + ")",
+                    topHubs));
         }
         return alerts;
     }

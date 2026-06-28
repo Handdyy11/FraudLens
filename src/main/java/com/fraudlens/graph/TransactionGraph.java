@@ -1,12 +1,9 @@
 package com.fraudlens.graph;
 
 import com.fraudlens.model.Transaction;
-
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
- * Singleton Pattern: single shared instance across all fraud detectors.
  * Builds and maintains the directed adjacency list of UPI transactions.
  */
 public class TransactionGraph {
@@ -41,15 +38,24 @@ public class TransactionGraph {
             String from = t.getFromAccount();
             String to = t.getToAccount();
 
-            // Build adjacency list (allows duplicates — mirrors real edges)
-            adjacencyList.computeIfAbsent(from, k -> new ArrayList<>()).add(to);
+            // Create sender node if it doesn't already exist.
+            if (!adjacencyList.containsKey(from)) {
+                adjacencyList.put(from, new ArrayList<>());
+            }
+            adjacencyList.get(from).add(to);
+            // Ensure to node also exists
+            if (!adjacencyList.containsKey(to)) {
+                adjacencyList.put(to, new ArrayList<>());
+            }
+            // Unique Edges
+            if (!uniqueEdges.containsKey(from)) {
+                uniqueEdges.put(from, new HashSet<>());
+            }
+            uniqueEdges.get(from).add(to);
 
-            // Ensure destination node exists in the map (even if it never sends)
-            adjacencyList.putIfAbsent(to, new ArrayList<>());
-
-            // Track unique edges for graph rendering
-            uniqueEdges.computeIfAbsent(from, k -> new HashSet<>()).add(to);
-            uniqueEdges.putIfAbsent(to, new HashSet<>());
+            if (!uniqueEdges.containsKey(to)) {
+                uniqueEdges.put(to, new HashSet<>());
+            }
         }
     }
 
@@ -65,9 +71,14 @@ public class TransactionGraph {
 
     /** Returns all transactions between two specific accounts. O(E). */
     public List<Transaction> getTransactionsBetween(String from, String to) {
-        return transactions.stream()
-                .filter(t -> t.getFromAccount().equals(from) && t.getToAccount().equals(to))
-                .collect(Collectors.toList());
+        List<Transaction> result = new ArrayList<>();
+        for (Transaction transaction : transactions) {
+            if (transaction.getFromAccount().equals(from)
+                    && transaction.getToAccount().equals(to)) {
+                result.add(transaction);
+            }
+        }
+        return result;
     }
 
     /** Returns the full transaction list for detectors that need timestamps. */
