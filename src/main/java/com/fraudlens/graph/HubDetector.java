@@ -20,8 +20,8 @@ import java.util.*;
  */
 public class HubDetector implements FraudDetector {
 
-    private static final int TOP_K = 10; // report the top 10 hub candidates
-    private static final int HUB_THRESHOLD = 6; // minimum degree to be flagged as hub
+    private static final int TOP_K = 3; // report the top 3 hub candidates
+    private static final int HUB_THRESHOLD = 25; // minimum degree to be flagged as hub
 
     @Override
     public List<FraudAlert> detect(TransactionGraph graph) {

@@ -18,21 +18,12 @@ import java.util.stream.Collectors;
  * 3. Computes propagation-based risk scores.
  * 4. Stores risk information inside Account objects.
  * 5. Provides graph and dashboard data for the frontend.
- *
- * Design:
- * - Uses Strategy Pattern through the FraudDetector interface.
- * - Depends on abstractions (SOLID Dependency Inversion).
- * - New fraud detectors can be added without modifying existing logic
- * (Open/Closed Principle).
  */
-
 @Service
 public class FraudAnalysisService {
 
-    // Singleton Pattern: single shared TransactionGraph instance (SOLID-S)
     private final TransactionGraph graph = new TransactionGraph();
 
-    // Strategy Pattern: list of all fraud detectors (observers)
     private final List<FraudDetector> detectors = Arrays.asList(
             new CycleDetector(),
             new HubDetector(),
@@ -40,114 +31,151 @@ public class FraudAnalysisService {
             new ThresholdDetector());
 
     private final PropagationScorer propagationScorer = new PropagationScorer();
+    private final BehaviourAnalyzer behaviourAnalyzer = new BehaviourAnalyzer();
 
-    // In-memory data stores
     private List<Account> accounts;
     private List<Transaction> transactions;
 
-    // Cached detection results (refreshed on every addTransaction call)
     private List<FraudAlert> lastAlerts;
     private Map<String, Double> propagationScores;
+    private Map<String, Integer> behaviourScores;
+    private Map<String, Integer> patternScores;
 
-    /** Called once by DataSeeder on startup. */
     public void initialize(List<Account> accounts, List<Transaction> transactions) {
         this.accounts = new ArrayList<>(accounts);
         this.transactions = new ArrayList<>(transactions);
         rebuildAndDetect();
     }
 
-    /**
-     * Observer Pattern: adds a transaction, notifies all detectors by re-running
-     * them.
-     * This is the trigger point for What-If simulation.
-     */
-    public List<FraudAlert> addTransaction(Transaction t) {
-        transactions.add(t);
-        ensureAccountExists(t.getFromAccount());
-        ensureAccountExists(t.getToAccount());
-        rebuildAndDetect();
-        return lastAlerts;
-    }
 
-    /** Rebuilds the graph and re-executes every detector strategy. */
+
     private void rebuildAndDetect() {
         graph.buildGraph(transactions);
 
-        // Run all detector strategies and merge results
         lastAlerts = new ArrayList<>();
         for (FraudDetector detector : detectors) {
             lastAlerts.addAll(detector.detect(graph));
         }
 
-        // Compute propagation scores from confirmed fraud accounts
         Set<String> fraudAccounts = getFraudAccountIds();
         propagationScores = propagationScorer.computeScores(graph, fraudAccounts);
+        behaviourScores = behaviourAnalyzer.analyse(accounts, transactions);
+        patternScores = computePatternScores();
 
-        // Stamp computed risk score and level onto every Account object
         stampRiskOnAccounts();
     }
 
-    // ── Stamp risk onto Account objects after every detection run ────────────
-
     private void stampRiskOnAccounts() {
-        Map<String, Long> txnCount = buildTxnCountMap();
-        double avg = txnCount.values().stream().mapToLong(Long::longValue).average().orElse(1.0);
         for (Account acc : accounts) {
             String id = acc.getAccountId();
-            int num = Integer.parseInt(id.substring(4));
-            if (num >= 81) {
-                acc.setRiskScore(0);
-                acc.setRiskLevel("NORMAL");
-            } else {
-                int score = computeWeightedScore(id, txnCount.getOrDefault(id, 0L), avg);
-                acc.setRiskScore(score);
-                acc.setRiskLevel(statusFromScore(score));
-            }
+            int score = computeFinalRiskScore(id);
+            acc.setRiskScore(score);
+            acc.setRiskLevel(statusFromScore(score));
         }
     }
 
-    // ── Compute weighted risk score for one account ──────────────────────────
+    // ── Pattern score constants ───────────────────────────────────────────────
+    //
+    // These scores feed into computePatternScores(). The weighted formula
+    // is applied for RAPID_HOP, THRESHOLD, and HUB accounts.
+    // CYCLE accounts bypass the formula entirely — see computeFinalRiskScore().
+    //
+    // | Pattern | Severity | Confidence | Score |
+    // |------------|----------|------------|-------|
+    // | CYCLE | CRITICAL | HIGH | 100 | bypasses formula → always FRAUD |
+    // | RAPID_HOP | CRITICAL | MODERATE | 60 | 60×0.60 = 36, +behaviour →
+    // SUSPICIOUS |
+    // | THRESHOLD | HIGH | MODERATE | 50 | 50×0.60 = 30, +behaviour → SUSPICIOUS |
+    // | HUB | HIGH | LOW | 40 | 40×0.60 = 24, secondary signal |
 
-    private int computeWeightedScore(String accountId, long txnCount, double avgTxnCount) {
-        int score = 0;
+    private static final int CYCLE_SCORE = 100;
+    private static final int RAPID_HOP_SCORE = 50;
+    private static final int THRESHOLD_SCORE = 50;
+    private static final int HUB_SCORE = 50;
+    private static final int DEFAULT_ALERT_SCORE = 40;
 
-        // Alert-type contributions (capped: only count the highest-severity alert once)
-        int maxAlertScore = 0;
-        int alertHits = 0;
+    // ── Base + Bonus Additive Model ──────────────────────────────────────────
+    //
+    // Final Risk = Base Pattern Score + (Propagation Bonus) + (Behaviour Bonus)
+    //
+    // Why this model:
+    // - Pattern (Base): Direct fraud evidence. A strong pattern (like 50) instantly 
+    //   pushes an account into SUSPICIOUS territory on its own.
+    // - Propagation (Bonus): Proximity to fraud nodes adds up to 25 points.
+    // - Behaviour (Bonus): Abnormal behaviour adds up to 14 points of supporting evidence.
+    //
+    // Result tiers:
+    // - Fraud pattern account → pattern score 50 → final 50-89 (SUSPICIOUS/FRAUD)
+    // - Multiple pattern account → pattern score 100 → final 100 (FRAUD)
+    // - Linked account → propagation up to ~25 → final ~25 (AT_RISK)
+    // - Innocent account → all zeros → final 0
+
+    private static final double WEIGHT_PROPAGATION = 0.25;
+    private static final double WEIGHT_BEHAVIOUR = 0.14;
+
+    // BehaviourAnalyzer max score is 100 (40+35+25). Used for normalisation.
+    private static final double MAX_BEHAVIOUR_RAW = 100.0;
+
+    private Map<String, Integer> computePatternScores() {
+        Map<String, Integer> scores = new HashMap<>();
         for (FraudAlert alert : lastAlerts) {
-            if (alert.getInvolvedAccounts().contains(accountId)) {
-                int contribution = switch (alert.getType()) {
-                    case "CYCLE" -> 20;
-                    case "RAPID_HOP" -> 15;
-                    case "HUB" -> 50;
-                    case "THRESHOLD" -> 50;
-                    default -> 10;
-                };
-                maxAlertScore = Math.max(maxAlertScore, contribution);
-                alertHits++;
+            int contribution = switch (alert.getType()) {
+                case "CYCLE" -> CYCLE_SCORE;
+                case "RAPID_HOP" -> RAPID_HOP_SCORE;
+                case "THRESHOLD" -> THRESHOLD_SCORE;
+                case "HUB" -> HUB_SCORE;
+                default -> DEFAULT_ALERT_SCORE;
+            };
+            for (String accountId : alert.getInvolvedAccounts()) {
+                scores.merge(accountId, contribution, Integer::sum);
             }
         }
-        // Primary alert contribution + small bonus for multiple alerts
-        score += maxAlertScore;
-        if (alertHits > 1)
-            score += Math.min((alertHits - 1) * 5, 15);
+        scores.replaceAll((k, v) -> Math.min(v, 100));
+        return scores;
+    }
 
-        // Propagation score contribution: 0–100 scaled to 0–30 points
-        score += (int) (propagationScores.getOrDefault(accountId, 0.0) * 0.30);
+    /**
+     * Computes the final risk score for one account.
+     *
+     * CYCLE accounts are short-circuited to 100 (always FRAUD).
+     * Circular money flow (A→B→C→A) is textbook money laundering.
+     *
+     * All other accounts use the Base + Bonus formula:
+     * Final Risk = patternScore
+     * + (propagationScore × 0.50)
+     * + (normalisedBehaviourScore × 0.20)
+     *
+     * Behaviour is normalised from 0–100 → 0–100 before applying weight.
+     * Result clamped to [0, 100].
+     */
+    private int computeFinalRiskScore(String accountId) {
+        // CYCLE = confirmed fraud. Bypass the formula entirely.
+        boolean inCycle = lastAlerts.stream()
+                .anyMatch(a -> a.getType().equals("CYCLE")
+                        && a.getInvolvedAccounts().contains(accountId));
+        if (inCycle)
+            return 100;
 
-        // Transaction volume bonus (mild)
-        if (txnCount > 3.0 * avgTxnCount)
-            score += 10;
-        else if (txnCount > 1.5 * avgTxnCount)
-            score += 3;
+        double pattern = patternScores.getOrDefault(accountId, 0);
+        double propagation = propagationScores.getOrDefault(accountId, 0.0);
 
-        return Math.min(score, 100); // cap at 100
+        double behaviourRaw = behaviourScores.getOrDefault(accountId, 0);
+        double behaviourNormalised = (behaviourRaw / MAX_BEHAVIOUR_RAW) * 100.0;
+
+        double finalScore = pattern 
+                + (propagation * WEIGHT_PROPAGATION)
+                + (behaviourNormalised * WEIGHT_BEHAVIOUR);
+
+        return Math.min((int) Math.round(finalScore), 100);
     }
 
     /**
      * Maps composite score to risk level label.
-     * These labels are used consistently across the entire system:
-     * backend Account objects, REST API responses, and frontend UI.
+     *
+     * FRAUD ≥ 80 — strong multi-detector evidence
+     * SUSPICIOUS ≥ 40 — at least one detector flagged this account
+     * AT_RISK ≥ 15 — linked to a fraud account via propagation
+     * NORMAL < 15 — no evidence of fraud
      */
     static String statusFromScore(int score) {
         if (score >= 80)
@@ -161,30 +189,20 @@ public class FraudAnalysisService {
 
     // ── Public accessors for account info ────────────────────────────────────
 
-    /**
-     * Builds per-account stats for the accounts table.
-     * Returns: accountId, name, totalTransactions, riskScore (composite),
-     * status (from composite), alertCount
-     */
     public List<Map<String, Object>> getAccountInfoList() {
         List<Map<String, Object>> result = new ArrayList<>();
+        Map<String, Long> txnCount = buildTxnCountMap();
         for (Account acc : accounts) {
             String id = acc.getAccountId();
-
-            // Count how many alerts involve this account
             long alertCount = lastAlerts.stream()
                     .filter(a -> a.getInvolvedAccounts().contains(id))
                     .count();
-
-            Map<String, Long> txnCount = buildTxnCountMap();
-            long count = txnCount.getOrDefault(id, 0L);
-
             Map<String, Object> info = new LinkedHashMap<>();
             info.put("accountId", id);
             info.put("name", acc.getName());
-            info.put("totalTransactions", count);
-            info.put("riskScore", acc.getRiskScore()); // composite weighted score
-            info.put("status", acc.getRiskLevel()); // consistent with statusFromScore()
+            info.put("totalTransactions", txnCount.getOrDefault(id, 0L));
+            info.put("riskScore", acc.getRiskScore());
+            info.put("status", acc.getRiskLevel());
             info.put("alertCount", alertCount);
             result.add(info);
         }
@@ -196,10 +214,8 @@ public class FraudAnalysisService {
     private Map<String, Long> buildTxnCountMap() {
         Map<String, Long> map = new HashMap<>();
         for (Transaction t : transactions) {
-            String from = t.getFromAccount();
-            map.put(from, map.getOrDefault(from, 0L) + 1);
-            String to = t.getToAccount();
-            map.put(to, map.getOrDefault(to, 0L) + 1);
+            map.merge(t.getFromAccount(), 1L, Long::sum);
+            map.merge(t.getToAccount(), 1L, Long::sum);
         }
         return map;
     }
@@ -211,7 +227,7 @@ public class FraudAnalysisService {
         }
     }
 
-    // ── Public accessors (unchanged) ──────────────────────────────────────────
+    // ── Public accessors ──────────────────────────────────────────────────────
 
     public TransactionGraph getGraph() {
         return graph;
@@ -250,24 +266,21 @@ public class FraudAnalysisService {
         return lastAlerts.stream()
                 .filter(a -> a.getType().equals("HUB"))
                 .flatMap(a -> a.getInvolvedAccounts().stream())
-                .distinct()
-                .collect(Collectors.toList());
+                .distinct().collect(Collectors.toList());
     }
 
     public List<String> getRapidHops() {
         return lastAlerts.stream()
                 .filter(a -> a.getType().equals("RAPID_HOP"))
                 .flatMap(a -> a.getInvolvedAccounts().stream())
-                .distinct()
-                .collect(Collectors.toList());
+                .distinct().collect(Collectors.toList());
     }
 
     public List<String> getThresholds() {
         return lastAlerts.stream()
                 .filter(a -> a.getType().equals("THRESHOLD"))
                 .flatMap(a -> a.getInvolvedAccounts().stream())
-                .distinct()
-                .collect(Collectors.toList());
+                .distinct().collect(Collectors.toList());
     }
 
     public Set<String> getFraudAccountIds() {
@@ -278,45 +291,38 @@ public class FraudAnalysisService {
         return fraud;
     }
 
-    // Build Graph according to views - Month / Week / Day
     public Map<String, Object> getGraphDataForSlice(String view, LocalDate date) {
         List<Transaction> slice = getTransactionsForSlice(view, date);
 
-        // Collect active nodes from filtered slice
         Set<String> activeNodes = new HashSet<>();
         for (Transaction t : slice) {
             activeNodes.add(t.getFromAccount());
             activeNodes.add(t.getToAccount());
         }
 
-        // Build nodes using already-stamped global risk from Account objects
         List<Map<String, Object>> nodes = new ArrayList<>();
         for (String nodeId : activeNodes) {
             Account acc = findAccountById(nodeId);
-            int score = (acc != null) ? acc.getRiskScore() : 0;
-            String status = (acc != null) ? acc.getRiskLevel() : "NORMAL";
-
-            Map<String, Object> nodeMap = new LinkedHashMap<>(); // JSON format
+            Map<String, Object> nodeMap = new LinkedHashMap<>();
             nodeMap.put("id", nodeId);
             nodeMap.put("label", nodeId);
-            nodeMap.put("riskScore", score);
-            nodeMap.put("status", status);
+            nodeMap.put("riskScore", (acc != null) ? acc.getRiskScore() : 0);
+            nodeMap.put("status", (acc != null) ? acc.getRiskLevel() : "NORMAL");
             nodes.add(nodeMap);
         }
 
-        // Build edges from filtered slice
         Map<String, Map<String, Object>> edgeMap = new LinkedHashMap<>();
         for (Transaction txn : slice) {
             String key = txn.getFromAccount() + ">" + txn.getToAccount();
-            if (!edgeMap.containsKey(key)) {
+            edgeMap.computeIfAbsent(key, k -> {
                 Map<String, Object> edge = new LinkedHashMap<>();
                 edge.put("from", txn.getFromAccount());
                 edge.put("to", txn.getToAccount());
                 edge.put("totalAmount", 0.0);
                 edge.put("txnCount", 0);
                 edge.put("type", "NORMAL");
-                edgeMap.put(key, edge);
-            }
+                return edge;
+            });
             Map<String, Object> edge = edgeMap.get(key);
             edge.put("totalAmount", (double) edge.get("totalAmount") + txn.getAmount());
             edge.put("txnCount", (int) edge.get("txnCount") + 1);
@@ -330,18 +336,15 @@ public class FraudAnalysisService {
         return result;
     }
 
-    // Creates and returns List of transactions based on view -month/week/day
     public List<Transaction> getTransactionsForSlice(String view, LocalDate date) {
-        if (date == null || "month".equals(view)) {
+        if (date == null || "month".equals(view))
             return new ArrayList<>(transactions);
-        }
 
         List<Transaction> result = new ArrayList<>();
         if ("day".equals(view)) {
             for (Transaction t : transactions) {
-                if (t.getTimestamp().toLocalDate().equals(date)) {
+                if (t.getTimestamp().toLocalDate().equals(date))
                     result.add(t);
-                }
             }
         } else if ("week".equals(view)) {
             LocalDate monday = date
@@ -349,19 +352,16 @@ public class FraudAnalysisService {
             LocalDate sunday = date.with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.SUNDAY));
             for (Transaction t : transactions) {
                 LocalDate tDate = t.getTimestamp().toLocalDate();
-                if (!tDate.isBefore(monday) && !tDate.isAfter(sunday)) {
+                if (!tDate.isBefore(monday) && !tDate.isAfter(sunday))
                     result.add(t);
-                }
             }
         }
         return result;
     }
 
-    // Returns Dashboard statistics
     public Map<String, Object> getStatsForSlice(String view, LocalDate date) {
         List<Transaction> slice = getTransactionsForSlice(view, date);
 
-        // Slice-based statistics
         Set<String> activeNodes = new HashSet<>();
         Set<String> edgeKeys = new HashSet<>();
         for (Transaction t : slice) {
@@ -370,22 +370,16 @@ public class FraudAnalysisService {
             edgeKeys.add(t.getFromAccount() + ">" + t.getToAccount());
         }
 
-        // Risk distribution from already-stamped Account values (global monthly
-        // analysis)
         Map<String, Long> distribution = new LinkedHashMap<>();
         distribution.put("FRAUD", 0L);
         distribution.put("SUSPICIOUS", 0L);
         distribution.put("AT_RISK", 0L);
         distribution.put("NORMAL", 0L);
         for (Account acc : accounts) {
-            String level = acc.getRiskLevel();
-            distribution.put(level, distribution.get(level) + 1);
+            distribution.merge(acc.getRiskLevel(), 1L, Long::sum);
         }
 
-        // Fraud alert counts from already-cached lastAlerts (global monthly analysis)
-        int cycles = 0;
-        int hubs = 0;
-        int rapids = 0;
+        int cycles = 0, hubs = 0, rapids = 0;
         for (FraudAlert alert : lastAlerts) {
             if (alert.getType().equals("CYCLE"))
                 cycles++;
@@ -397,25 +391,21 @@ public class FraudAnalysisService {
 
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("totalTransactions", slice.size());
-        stats.put("totalAccounts", activeNodes.size());
+        stats.put("totalAccounts", accounts.size());
         stats.put("edgeCount", edgeKeys.size());
         stats.put("cyclesDetected", cycles);
         stats.put("hubAccounts", hubs);
         stats.put("rapidHopAlerts", rapids);
         stats.put("fraudAlerts", lastAlerts.size());
         stats.put("riskDistribution", distribution);
-
         return stats;
     }
 
-    // Provides account based on input id
     private Account findAccountById(String accountId) {
         for (Account acc : accounts) {
-            if (acc.getAccountId().equals(accountId)) {
+            if (acc.getAccountId().equals(accountId))
                 return acc;
-            }
         }
         return null;
     }
-
 }

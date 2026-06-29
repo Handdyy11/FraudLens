@@ -125,35 +125,7 @@ public class FraudController {
                 date = LocalDate.of(2024, 1, 18);
             }
         return fraudAnalysisService.getStatsForSlice(view, date);
-    }
-
-    /**
-     * POST /api/transactions
-     * Adds a new transaction and triggers What-If simulation (re-runs all detectors).
-     */
-    @PostMapping("/transactions")
-    public Map<String, Object> addTransaction(@RequestBody Map<String, Object> body) {
-        String from = (String) body.get("fromAccount");
-        String to = (String) body.get("toAccount");
-        double amount = ((Number) body.get("amount")).doubleValue();
-
-        Transaction t = new Transaction(
-                "SIM_" + UUID.randomUUID().toString().substring(0, 8),
-                from, to, amount, LocalDateTime.now(), "NORMAL"
-        );
-
-        List<FraudAlert> alerts = fraudAnalysisService.addTransaction(t);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("transaction", txnToMap(t));
-        result.put("newAlerts", alerts);
-        result.put("propagationScores", fraudAnalysisService.getPropagationScores());
-        result.put("cycleDetected", alerts.stream().anyMatch(a -> a.getType().equals("CYCLE")));
-        result.put("message", alerts.isEmpty()
-                ? "Transaction added — no new fraud patterns detected."
-                : "⚠ Fraud pattern triggered! " + alerts.size() + " alert(s) raised.");
-        return result;
-    }
+}
 
     private Map<String, Object> txnToMap(Transaction t) {
         Map<String, Object> m = new LinkedHashMap<>();
