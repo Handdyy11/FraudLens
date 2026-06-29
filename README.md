@@ -15,8 +15,6 @@ Fraud rarely exists in a single transaction. Instead, fraud emerges through rela
 Representing transactions as a directed graph allows classical graph algorithms like DFS and BFS to efficiently identify circular money laundering, hub accounts, layered transfers and network propagation.
 
 ## 📸 Screenshots
-*(Note: Please place your screenshots in a `docs/` folder to render them here)*
-
 **Dashboard**
 ![Dashboard](docs/dashboard.png)
 
